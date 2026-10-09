@@ -427,6 +427,7 @@ const LINES = [
 ];
 const LINE = Object.fromEntries(LINES.map(l => [l.id, l]));
 const covColor = def => def.cov ? COVS[def.cov].color : CAT[def.cat].color;
+function covColorOf(d, def) { const z = d && d.zone && O.covByZone !== false ? P.zones.find(x => x.id === d.zone) : null; return z ? z.color : covColor(def); }
 
 /* ---------- stan ---------- */
 const LS_KEY = 'zasieg.projekt.v1';
@@ -1033,7 +1034,7 @@ function drawScene(ctx, pl, v, W, H, o) {
   if (L.cov) for (const d of pl.devices) {
     if (d.showCov === false) continue;
     const v2 = visOf(pl, d); if (!v2) continue;
-    const def = DEV[d.type], col = covColor(def), path = visPath(v2);
+    const def = DEV[d.type], col = covColorOf(d, def), path = visPath(v2);
     ctx.fillStyle = hexA(col, O.covAlpha); ctx.fill(path);
     ctx.lineWidth = 1.1 * K / z; ctx.strokeStyle = hexA(col, 0.85); ctx.setLineDash([6 * K / z, 3 * K / z]); ctx.stroke(path); ctx.setLineDash([]);
   }
@@ -1303,8 +1304,8 @@ function sheetCanvas(pl, W, H) {
   const px = M, py = M, pw = RW ? W - 3 * M - RW : W - 2 * M, ph = H - 2 * M, rx = px + pw + M;
   g.strokeRect(px, py, pw, ph);
   const bx = contentBox(pl) || { x0: 0, y0: 0, x1: 100, y1: 100 };
-  const bw = bx.x1 - bx.x0, bh = bx.y1 - bx.y0, z = Math.min((pw - 40 * K) / bw, (ph - 40 * K) / bh);
-  const v = { z, x: px + (pw - bw * z) / 2 - bx.x0 * z, y: py + (ph - bh * z) / 2 - bx.y0 * z };
+  const bw = bx.x1 - bx.x0, bh = bx.y1 - bx.y0, sbH = 70 * K, z = Math.min((pw - 40 * K) / bw, (ph - sbH - 30 * K) / bh);
+  const v = { z, x: px + (pw - bw * z) / 2 - bx.x0 * z, y: py + (ph - sbH - bh * z) / 2 + 10 * K - bx.y0 * z };
   g.save(); g.beginPath(); g.rect(px, py, pw, ph); g.clip();
   const deadSave = O.dead; O.dead = '';
   drawScene(g, pl, v, W, H, { ui: false, export: true });
@@ -1341,9 +1342,14 @@ function sheetCanvas(pl, W, H) {
   }
   yy += 6 * K;
   for (const c2 of ['intr', 'fire', 'video']) {
-    if (!pl.devices.some(d => DEV[d.type].cov === c2 && d.range > 0) || yy > py + lgH - rowH) continue;
+    if (!pl.devices.some(d => DEV[d.type].cov === c2 && d.range > 0 && (!d.zone || O.covByZone === false)) || yy > py + lgH - rowH) continue;
     g.fillStyle = hexA(COVS[c2].color, 0.3); g.strokeStyle = COVS[c2].color; g.lineWidth = 1.5 * K; g.fillRect(rx + 16 * K, yy - 8 * K, 26 * K, 16 * K); g.strokeRect(rx + 16 * K, yy - 8 * K, 26 * K, 16 * K);
     g.fillStyle = '#1a2730'; g.font = '500 ' + 13 * K + 'px ' + FONT; g.fillText('Zasięg: ' + COVS[c2].name.toLowerCase(), rx + 50 * K, yy); yy += rowH;
+  }
+  if (O.covByZone !== false) for (const zn of P.zones) {
+    if (!pl.devices.some(d => d.zone === zn.id && d.range > 0) || yy > py + lgH - rowH) continue;
+    g.fillStyle = hexA(zn.color, 0.3); g.strokeStyle = zn.color; g.lineWidth = 1.5 * K; g.fillRect(rx + 16 * K, yy - 8 * K, 26 * K, 16 * K); g.strokeRect(rx + 16 * K, yy - 8 * K, 26 * K, 16 * K);
+    g.fillStyle = '#1a2730'; g.font = '500 ' + 13 * K + 'px ' + FONT; g.fillText('Zasięg: ' + zn.name, rx + 50 * K, yy); yy += rowH;
   }
   }
   const ty = hasL ? py + lgH + M : py + ph - tbH;
@@ -2361,7 +2367,7 @@ function renderLayers() {
     return rowEl(label, rng, num, h('span', { class: 'unit', text: unit }));
   };
   box.append(sec('Drzwi, okna i witryny', h('div', { class: 'btnrow', style: 'margin-top:0' }, h('button', { class: 'btn line', text: 'Zamknij wszystkie', onclick: () => { plan().doors.forEach(d => d.closed = true); touch(); commit(); } }), h('button', { class: 'btn line', text: 'Otwórz wszystkie', onclick: () => { plan().doors.forEach(d => d.closed = false); touch(); commit(); } })), h('div', { class: 'note', style: 'margin-top:6px', text: 'Zamknięty element przesłania zasięg czujek jak ściana. Dotyczy bieżącej kondygnacji.' })));
-  box.append(sec('Wygląd', sl('Przezroczystość podkładu', 'bgOpacity', 10, 100, 5, '%', 100), sl('Intensywność zasięgów', 'covAlpha', 5, 60, 1, '%', 100), sl('Rozmiar symboli', 'sym', 60, 220, 10, '%', 100)));
+  box.append(sec('Wygląd', sl('Przezroczystość podkładu', 'bgOpacity', 10, 100, 5, '%', 100), sl('Intensywność zasięgów', 'covAlpha', 5, 60, 1, '%', 100), sl('Rozmiar symboli', 'sym', 60, 220, 10, '%', 100), chk('Kolor zasięgu wg strefy urządzenia', () => O.covByZone !== false, v => O.covByZone = v)));
   box.append(sec('Obliczenia',
     chk('Ściany ograniczają zasięg (cień)', () => O.occlusion, v => O.occlusion = v),
     chk('Krawędzie pomieszczeń też blokują zasięg', () => O.roomBlock, v => O.roomBlock = v),
