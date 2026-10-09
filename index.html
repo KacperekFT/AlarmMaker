@@ -318,7 +318,7 @@ function h(tag, props, ...kids) {
     else if (v === true) e.setAttribute(k, '');
     else e.setAttribute(k, v);
   }
-  for (const c of kids.flat()) { if (c == null || c === false) continue; e.append(c.nodeType ? c : document.createTextNode(c)); }
+  for (const c of kids.flat(Infinity)) { if (c == null || c === false) continue; e.append(c.nodeType ? c : document.createTextNode(c)); }
   return e;
 }
 
@@ -435,7 +435,7 @@ const O = {
   occlusion: true, roomBlock: false, autoWalls: true,
   gridStep: 0.5, wallT: 0.15, reserve: 10, doorW: 0.9, winW: 1.2, shopW: 2.5,
   L: { bg: true, rooms: true, walls: true, cov: true, dev: true, labels: true, cables: true, dims: true, texts: true },
-  bgOpacity: 1, covAlpha: 0.2, sym: 1, dead: '', lockStruct: false
+  bgOpacity: 1, covAlpha: 0.2, sym: 1, dead: '', lockStruct: false, showLegend: true, showTitle: true, sheetTitle: 'System alarmowy — rzut', sheetNote: ''
 };
 let P = null, ai = 0;
 const BG = new Map();       // planId -> {canvas,w,h,url}
@@ -1190,7 +1190,7 @@ function drawOverlay(ctx, pl, v, W, H) {
   if (S.tool === 'place' && S.placing && S.snap && S.snap.x != null) {
     const def = DEV[S.placing], s = w2s(v, S.snap), r = symRadius(pl, v.z);
     if (def.range > 0 && L_cov()) {
-      const tmp = { x: S.snap.x, y: S.snap.y, rot: S.snap.rot || 0, range: def.range, fov: def.fov, occ: true, type: S.placing };
+      const tmp = { x: S.snap.x, y: S.snap.y, rot: S.snap.rot || 0, range: S.placeTpl ? S.placeTpl.range : def.range, fov: S.placeTpl ? S.placeTpl.fov : def.fov, occ: true, type: S.placing };
       const vv = visOf(pl, tmp);
       if (vv) {
         ctx.save(); ctx.translate(v.x, v.y); ctx.scale(v.z, v.z);
@@ -1318,7 +1318,8 @@ function sheetCanvas(pl, W, H) {
   g.font = '600 ' + 13 * K + 'px ' + FONT; g.textAlign = 'left'; g.textBaseline = 'alphabetic'; g.fillText('0', sx, sy - 5 * K); g.textAlign = 'right'; g.fillText(sm + ' m', sx + sl, sy - 5 * K);
   g.restore();
   /* prawa kolumna: legenda + tabliczka */
-  const tbH = Math.round(ph * 0.3), lgH = ph - tbH - M;
+  const tbH = Math.round(ph * (O.sheetNote ? 0.36 : 0.3)), lgH = ph - tbH - M;
+  if (O.showLegend !== false) {
   g.strokeStyle = '#1a2730'; g.lineWidth = 2 * K; g.strokeRect(rx, py, RW, lgH);
   g.textAlign = 'left'; g.textBaseline = 'middle'; g.fillStyle = '#1a2730';
   g.font = '700 ' + 17 * K + 'px ' + FONT; g.fillText('Legenda', rx + 16 * K, py + 26 * K);
@@ -1344,11 +1345,14 @@ function sheetCanvas(pl, W, H) {
     g.fillStyle = hexA(COVS[c2].color, 0.3); g.strokeStyle = COVS[c2].color; g.lineWidth = 1.5 * K; g.fillRect(rx + 16 * K, yy - 8 * K, 26 * K, 16 * K); g.strokeRect(rx + 16 * K, yy - 8 * K, 26 * K, 16 * K);
     g.fillStyle = '#1a2730'; g.font = '500 ' + 13 * K + 'px ' + FONT; g.fillText('Zasięg: ' + COVS[c2].name.toLowerCase(), rx + 50 * K, yy); yy += rowH;
   }
+  }
   const ty = py + lgH + M;
+  if (O.showTitle !== false) {
   g.strokeStyle = '#1a2730'; g.lineWidth = 2 * K; g.strokeRect(rx, ty, RW, tbH);
   const rows = [['Projekt', P.name], ['Rysunek', pl.name], ['Inwestor', P.client || '—'], ['Projektant', P.author || '—'], ['Data', P.date || '—']];
+  if (O.sheetNote) rows.push(['Uwagi', O.sheetNote]);
   const rh2 = tbH / (rows.length + 1);
-  g.fillStyle = '#1a2730'; g.font = '700 ' + 19 * K + 'px ' + FONT; g.textAlign = 'left'; g.fillText('System alarmowy — rzut', rx + 16 * K, ty + rh2 / 2);
+  g.fillStyle = '#1a2730'; g.font = '700 ' + 19 * K + 'px ' + FONT; g.textAlign = 'left'; g.fillText(O.sheetTitle || 'System alarmowy — rzut', rx + 16 * K, ty + rh2 / 2);
   rows.forEach((r, i) => {
     const y0 = ty + rh2 * (i + 1);
     g.lineWidth = 1 * K; g.beginPath(); g.moveTo(rx, y0); g.lineTo(rx + RW, y0); g.stroke();
@@ -1357,6 +1361,7 @@ function sheetCanvas(pl, W, H) {
     let t = String(r[1]); while (g.measureText(t).width > RW - 32 * K && t.length > 4) t = t.slice(0, -2);
     g.fillText(t, rx + 16 * K, y0 + rh2 * 0.68);
   });
+  }
   K = saveK;
   return c;
 }
@@ -1569,7 +1574,7 @@ const TOOL_HINT = {
 };
 function setTool(t, arg) {
   S.draw = null; S.typed = ''; S.drag = null; S.snap = null; hideHud();
-  S.tool = t; S.placing = null;
+  S.tool = t; S.placing = null; if (t !== 'place') S.placeTpl = null;
   if (t === 'place') S.placing = arg;
   if (t === 'line') S.lineKind = arg || S.lineKind || 'cab_bus';
   if (t === 'line' && arg == null && !S.lineKind) S.lineKind = 'cab_bus';
@@ -1803,6 +1808,7 @@ function onDown(e) {
   if (t === 'place' && S.placing) {
     const sn = S.snap, def = DEV[S.placing];
     const d = newDevice(def.id, sn.x, sn.y, sn.rot != null ? sn.rot : S.lastRot, defaultZoneAt(pl, sn.x, sn.y));
+    if (S.placeTpl) Object.assign(d, S.placeTpl);
     pl.devices.push(d); S.sel = [{ k: 'd', id: d.id }]; touch();
     S.drag = { type: 'aim', id: d.id, sx: p.x, sy: p.y, moved: false };
     renderInspector();
@@ -2057,7 +2063,7 @@ function buildPalette() {
     if (!items.length) continue;
     const det = h('details', { open: q ? true : (cat.id === 'intr' || cat.id === 'fire') },
       h('summary', {}, h('span', { class: 'cdot', style: 'background:' + cat.color }), cat.name),
-      items.map(d => h('button', { class: 'pitem', 'data-dev': d.id, onclick: () => { if (S.tool === 'place' && S.placing === d.id) setTool('select'); else setTool('place', d.id); closeNarrow(); } },
+      items.map(d => h('button', { class: 'pitem', 'data-dev': d.id, onclick: () => { S.placeTpl = null; if (S.tool === 'place' && S.placing === d.id) setTool('select'); else setTool('place', d.id); closeNarrow(); } },
         h('img', { src: symIcon(d), alt: '' }), h('span', { class: 'pn' }, d.name, h('div', { class: 'pr', text: d.range > 0 ? 'zasięg ' + d.range + ' m' + (d.fov < 360 ? ' · ' + d.fov + '°' : ' · 360°') : d.abbr })))));
     list.append(det);
   }
@@ -2220,7 +2226,12 @@ function devPanel(box, d) {
     if (def.mount === 'wall') box.append(sec('', numRow('Obrót', () => d.rot, v => { d.rot = v; }, { min: 0, max: 359, step: 1, unit: '°', slider: true })));
   }
   box.append(sec('Notatka', h('div', { class: 'ctl' }, (() => { const t = h('textarea', { placeholder: 'Uwagi do montażu…' }); t.value = d.note || ''; t.addEventListener('input', () => { d.note = t.value; }); t.addEventListener('change', () => commit()); return t; })())));
-  box.append(h('div', { class: 'btnrow' }, h('button', { class: 'btn line', text: 'Duplikuj', onclick: duplicateSel }), h('button', { class: 'btn danger line', text: 'Usuń', onclick: deleteSel })));
+  box.append(sec('Kopiowanie ustawień',
+    h('div', { class: 'btnrow', style: 'margin-top:0' },
+      h('button', { class: 'btn line', title: 'Ctrl+D', text: 'Duplikuj', onclick: duplicateSel }),
+      h('button', { class: 'btn primary', text: 'Wstaw kolejne takie same', onclick: () => { setTool('place', d.type); S.placeTpl = { range: d.range, fov: d.fov, h: d.h, zone: d.zone, occ: d.occ, showCov: d.showCov }; S.lastRot = d.rot; toast('Klikaj na rysunku — nowe urządzenia dostaną ten sam zasięg i kąt'); } }),
+      h('button', { class: 'btn line', text: 'Zastosuj do wszystkich tego typu', onclick: () => { let n = 0; for (const p of P.plans) for (const x of p.devices) if (x.type === d.type && x !== d) { x.range = d.range; x.fov = d.fov; x.h = d.h; x.occ = d.occ; x.showCov = d.showCov; x._vis = null; n++; } touch(); commit(); toast('Zaktualizowano ' + n + ' urządzeń (zasięg, kąt, wysokość)'); } }))));
+  box.append(h('div', { class: 'btnrow' }, h('button', { class: 'btn danger line', text: 'Usuń', onclick: deleteSel })));
 }
 function roomPanel(box, r) {
   const pl = plan(), area = polyArea(r.pts) / (pl.ppm * pl.ppm), per = polyPerim(r.pts) / pl.ppm;
@@ -2355,6 +2366,13 @@ function renderLayers() {
     chk('Ściany ograniczają zasięg (cień)', () => O.occlusion, v => O.occlusion = v),
     chk('Krawędzie pomieszczeń też blokują zasięg', () => O.roomBlock, v => O.roomBlock = v),
     h('div', { class: 'note', text: 'Zasięg jest liczony metodą promieni z krokiem 0,5° — czujka „nie widzi” przez ściany. Otwory w ścianach (drzwi) przepuszczają zasięg.' })));
+  const tin = (label, key, ph) => { const i = h('input', { type: 'text', value: O[key] || '', placeholder: ph || '' }); i.addEventListener('input', () => { O[key] = i.value; scheduleSave(); }); return rowEl(label, i); };
+  box.append(sec('Arkusz eksportu (PNG / PDF / raport)',
+    chk('Pokaż legendę', () => O.showLegend !== false, v => O.showLegend = v),
+    chk('Pokaż tabliczkę rysunkową', () => O.showTitle !== false, v => O.showTitle = v),
+    tin('Nagłówek tabliczki', 'sheetTitle', 'np. Projekt systemu SSWiN'),
+    tin('Dodatkowa uwaga', 'sheetNote', 'opcjonalnie'),
+    h('div', { class: 'note', text: 'Inwestora, projektanta i datę ustawisz w Właściwościach (bez zaznaczenia).' })));
   box.append(sec('Rysowanie',
     chk('Twórz ściany wzdłuż obrysu nowego pomieszczenia', () => O.autoWalls, v => O.autoWalls = v),
     numRow('Grubość nowych ścian', () => Math.round(O.wallT * 100), v => { O.wallT = v / 100; }, { min: 5, max: 60, step: 1, unit: 'cm' }),
