@@ -2673,12 +2673,12 @@ async function newProjectAction() {
 }
 
 /* ---------- eksport ---------- */
-async function exportPng() {
+async function doExportPng() {
   const stop = busy('Przygotowanie arkusza…'); await new Promise(r => setTimeout(r, 30));
   try { const c = sheetCanvas(plan(), 4200, 2970); const blob = await new Promise(r => c.toBlob(r, 'image/png')); stop(); await saveFile(fileBase() + '-' + plan().name.replace(/[^\p{L}\p{N}_-]+/gu, '_') + '.png', blob); }
   catch (e) { stop(); toast('Błąd eksportu: ' + e.message); }
 }
-async function exportPdf() {
+async function doExportPdf() {
   const stop = busy('Generowanie PDF…');
   try {
     if (!window.jspdf) await loadScript('https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js');
@@ -2688,7 +2688,7 @@ async function exportPdf() {
     const blob = doc.output('blob'); stop(); await saveFile(fileBase() + '.pdf', blob);
   } catch (e) { stop(); console.error(e); toast('Nie udało się wygenerować PDF: ' + e.message); }
 }
-async function makeReport() {
+async function doMakeReport() {
   const stop = busy('Budowanie raportu…'); await new Promise(r => setTimeout(r, 30));
   try {
     const b = bomData('all'), css = 'body{font:14px/1.5 system-ui,sans-serif;max-width:1000px;margin:24px auto;padding:0 16px;color:#1a2730}h1{margin:0 0 4px}h2{margin:28px 0 8px;border-bottom:2px solid #1a2730;padding-bottom:4px}table{border-collapse:collapse;width:100%;margin:8px 0}th,td{border:1px solid #c9d2d8;padding:5px 8px;text-align:left}th{background:#eef2f4}td.n{text-align:right}img{max-width:100%;border:1px solid #c9d2d8}.m{color:#586a76}';
@@ -2702,6 +2702,31 @@ async function makeReport() {
     stop(); await saveFile(fileBase() + '-raport.html', html);
   } catch (e) { stop(); toast('Błąd raportu: ' + e.message); }
 }
+
+/* ---------- podgląd przed zapisem ---------- */
+function showPreview(o) {
+  let idx = 0;
+  const img = h('img', { alt: 'Podgląd arkusza', style: 'width:100%;display:block;border:1px solid var(--line);background:#fff;margin-top:10px' });
+  const info = h('div', { class: 'note', style: 'margin-top:6px' });
+  const render = () => {
+    const pl = o.plans[idx];
+    try { img.src = sheetCanvas(pl, 1700, 1200).toDataURL('image/jpeg', 0.86); } catch (e) { toast('Nie udało się zrobić podglądu'); }
+    info.textContent = 'Kondygnacja: ' + pl.name + (o.plans.length > 1 ? ' (' + (idx + 1) + ' z ' + o.plans.length + ')' : '') + '. ' + (o.note || '');
+  };
+  const chk = (label, key) => { const c = h('input', { type: 'checkbox', checked: O[key] !== false }); c.addEventListener('change', () => { O[key] = c.checked; scheduleSave(); render(); }); return h('label', { class: 'check', style: 'display:inline-flex;margin-right:14px' }, c, h('span', { text: label })); };
+  const title = h('input', { type: 'text', value: O.sheetTitle || '', placeholder: 'Nagłówek tabliczki', 'aria-label': 'Nagłówek tabliczki', style: 'height:28px;min-width:200px;border:1px solid var(--line);background:var(--panel2);border-radius:5px;padding:0 8px' });
+  title.addEventListener('input', () => { O.sheetTitle = title.value; scheduleSave(); clearTimeout(title._t); title._t = setTimeout(render, 250); });
+  const ctrl = h('div', { style: 'display:flex;flex-wrap:wrap;align-items:center;gap:6px' }, chk('Legenda', 'showLegend'), chk('Tabliczka rysunkowa', 'showTitle'), title);
+  if (o.plans.length > 1) {
+    const sel = h('select', { 'aria-label': 'Kondygnacja', style: 'height:28px;border:1px solid var(--line);background:var(--panel2);border-radius:5px' }, o.plans.map((p, i) => h('option', { value: i, text: p.name })));
+    sel.addEventListener('change', () => { idx = parseInt(sel.value, 10); render(); }); ctrl.append(sel);
+  }
+  openModal({ title: 'Podgląd przed zapisem: ' + o.label, wide: true, body: h('div', {}, ctrl, img, info), buttons: [{ label: 'Anuluj', onClick: closeModal }, { label: 'Zapisz plik', primary: true, onClick: () => { closeModal(); o.save(); } }] });
+  setTimeout(render, 20);
+}
+function exportPng() { showPreview({ label: 'PNG', plans: [plan()], save: doExportPng }); }
+function exportPdf() { showPreview({ label: 'PDF (wszystkie kondygnacje)', plans: P.plans, save: doExportPdf }); }
+function makeReport() { showPreview({ label: 'raport HTML', plans: P.plans, note: 'Raport zawiera też tabele zestawień.', save: doMakeReport }); }
 
 /* ---------- menu górne ---------- */
 function buildMenus() {
