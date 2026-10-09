@@ -69,6 +69,13 @@ svg{display:block}
 
 /* ---------- główny układ ---------- */
 #main{display:grid;grid-template-columns:62px 252px minmax(0,1fr) 316px;min-height:0;position:relative}
+#rail{grid-column:1}#palette{grid-column:2}#stage{grid-column:3}#side{grid-column:4}
+#main.hideL{grid-template-columns:62px 0 minmax(0,1fr) 316px}
+#main.hideR{grid-template-columns:62px 252px minmax(0,1fr) 0}
+#main.hideL.hideR{grid-template-columns:62px 0 minmax(0,1fr) 0}
+#main.hideL #palette,#main.hideR #side{display:none}
+#optbar.collapsed .optgroup:not(.keep){display:none}
+.ibtn[aria-pressed="true"]{background:var(--accent-soft);box-shadow:inset 0 -2px 0 var(--accent)}
 #rail{background:var(--panel);border-right:1px solid var(--line);display:flex;flex-direction:column;align-items:center;padding:6px 0;gap:2px;overflow-y:auto}
 .tool{width:54px;border:1px solid transparent;border-radius:7px;background:transparent;display:flex;flex-direction:column;align-items:center;gap:1px;padding:5px 0 3px;color:var(--muted);font-size:10.5px;font-family:'Barlow Semi Condensed','Barlow',sans-serif;font-weight:500}
 .tool svg{width:22px;height:22px;color:var(--text)}
@@ -190,7 +197,7 @@ table.t img{width:22px;height:22px;vertical-align:middle;margin-right:6px}
 .modal{background:var(--panel);border:1px solid var(--line);border-radius:12px;box-shadow:var(--shadow);width:min(520px,100%);max-height:calc(100vh - 32px);display:flex;flex-direction:column}
 .modal.wide{width:min(860px,100%)}
 .modal header{padding:14px 18px 6px;font-size:16px;font-weight:700;font-family:'Barlow Semi Condensed','Barlow',sans-serif}
-.modal .mb{padding:6px 18px 12px;overflow:auto;line-height:1.5}
+.modal .mb{padding:6px 18px 12px;overflow:auto;line-height:1.5;min-height:0;flex:1 1 auto}
 .modal footer{padding:10px 18px 14px;display:flex;justify-content:flex-end;gap:8px;flex-wrap:wrap}
 .modal input.full{width:100%;height:32px;border:1px solid var(--line);background:var(--panel2);border-radius:6px;padding:0 10px;margin-top:4px}
 .modal .grid2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
@@ -216,6 +223,8 @@ table.t img{width:22px;height:22px;vertical-align:middle;margin-right:6px}
   #side{right:0;border-left:1px solid var(--line)}
   #main.showL #palette{display:flex}
   #main.showR #side{display:flex}
+  #main.hideL,#main.hideR,#main.hideL.hideR{grid-template-columns:58px minmax(0,1fr)}
+  #main.hideL #palette,#main.hideR #side{display:none}
   .only-narrow{display:inline-flex}
   #stage{grid-column:2}
   .name-input{width:110px}
@@ -244,8 +253,8 @@ table.t img{width:22px;height:22px;vertical-align:middle;margin-right:6px}
     <button class="ibtn" id="btnRedo" title="Ponów (Ctrl+Y)" aria-label="Ponów"></button>
     <button class="chip" id="scaleChip" title="Ustaw skalę rysunku"></button>
     <button class="ibtn" id="btnHelp" title="Skróty klawiszowe i pomoc (?)" aria-label="Pomoc"></button>
-    <button class="ibtn only-narrow" id="btnPanelL" title="Katalog urządzeń" aria-label="Katalog urządzeń"></button>
-    <button class="ibtn only-narrow" id="btnPanelR" title="Panel właściwości" aria-label="Panel właściwości"></button>
+    <button class="ibtn" id="btnPanelL" title="Pokaż / ukryj katalog urządzeń" aria-label="Katalog urządzeń"></button>
+    <button class="ibtn" id="btnPanelR" title="Pokaż / ukryj panel właściwości" aria-label="Panel właściwości"></button>
   </header>
   <div id="main">
     <aside id="rail" aria-label="Narzędzia"></aside>
@@ -533,6 +542,10 @@ function occl(pl) {
   for (const d of pl.doors) if (d.closed) {
     const ux = Math.cos(d.ang), uy = Math.sin(d.ang);
     segs.push([d.x - ux * d.w / 2, d.y - uy * d.w / 2, d.x + ux * d.w / 2, d.y + uy * d.w / 2, d.t * pl.ppm / 2 + 0.12 * pl.ppm]);
+  }
+  for (const d of pl.doors) if (!d.closed && (d.kind || 'door') === 'door') {
+    const ux = Math.cos(d.ang), uy = Math.sin(d.ang), hx = d.x - ux * d.w / 2 * d.hinge, hy = d.y - uy * d.w / 2 * d.hinge, nx = -uy * d.sw, ny = ux * d.sw;
+    segs.push([hx, hy, hx + nx * d.w, hy + ny * d.w]);   // otwarte skrzydło
   }
   let sig = segs.length;
   for (const s of segs) sig += s[0] * 1.1 + s[1] * 2.3 + s[2] * 3.7 + s[3] * 5.1 + (s[4] || 0) * 0.7;
@@ -1959,6 +1972,7 @@ function onKey(e) {
   if (low === 'g') { O.snapGrid = !O.snapGrid; refreshUI(); return; }
   if (low === 'o') { O.ortho = !O.ortho; refreshUI(); return; }
   if (low === 'f') { fitView(plan()); return; }
+  if (low === 'p') { toggleFocus(); return; }
   if (TOOL_KEYS[low]) setTool(TOOL_KEYS[low][0]);
 }
 function bindCanvas() {
@@ -2026,9 +2040,9 @@ function confirmBox(title, text, okLabel) {
   });
 }
 function showHelp() {
-  const rows = [['V', 'Zaznaczanie i edycja'], ['H / Spacja', 'Przesuwanie widoku'], ['W', 'Rysuj ściany'], ['R', 'Rysuj pomieszczenie (wielokąt)'], ['B', 'Pomieszczenie – prostokąt'], ['D', 'Wstaw drzwi (otwór w ścianie)'], ['C', 'Okablowanie / bariery'], ['M', 'Wymiar'], ['K', 'Ustaw skalę rysunku'], ['T', 'Opis tekstowy'], ['Q / E', 'Obrót urządzenia o 15°'], ['Strzałki', 'Przesuń zaznaczenie (Shift — 5×)'], ['G / O', 'Siatka / Ortho'], ['F', 'Dopasuj widok'], ['Ctrl+Z / Y', 'Cofnij / Ponów'], ['Ctrl+C / V / D', 'Kopiuj / Wklej / Duplikuj'], ['Ctrl+S', 'Zapisz projekt'], ['Del', 'Usuń zaznaczone'], ['Cyfry', 'Wpisz dokładną długość podczas rysowania, Enter — zatwierdź']];
-  const body = h('div', {}, h('div', { class: 'keys' }, rows.map(r => [h('b', {}, r[0].split(' / ').map((k, i) => [i ? ' / ' : null, h('i', { text: k })])), h('span', { text: r[1] })])),
-    h('p', { class: 'note', text: 'Zasięg czujek uwzględnia ściany (przycisk „Ściany blokują” u góry). Wartości zasięgów w katalogu są orientacyjne — przed realizacją sprawdź dane producenta i obowiązujące normy.' }));
+  const rows = [['V', 'Zaznaczanie i edycja'], ['H / Spacja', 'Przesuwanie widoku'], ['W', 'Rysuj ściany'], ['R', 'Rysuj pomieszczenie (wielokąt)'], ['B', 'Pomieszczenie – prostokąt'], ['D', 'Wstaw drzwi (otwór w ścianie)'], ['C', 'Okablowanie / bariery'], ['M', 'Wymiar'], ['K', 'Ustaw skalę rysunku'], ['T', 'Opis tekstowy'], ['Q / E', 'Obrót urządzenia o 15°'], ['Strzałki', 'Przesuń zaznaczenie (Shift — 5×)'], ['G / O', 'Siatka / Ortho'], ['P', 'Ukryj / pokaż wszystkie panele (większa przestrzeń robocza)'], ['F', 'Dopasuj widok'], ['Ctrl+Z / Y', 'Cofnij / Ponów'], ['Ctrl+C / V / D', 'Kopiuj / Wklej / Duplikuj'], ['Ctrl+S', 'Zapisz projekt'], ['Del', 'Usuń zaznaczone'], ['Cyfry', 'Wpisz dokładną długość podczas rysowania, Enter — zatwierdź']];
+  const kb = r => r[0].split(' / ').map(k => '<i>' + esc(k) + '</i>').join(' / ');
+  const body = h('div', { html: '<div class="keys">' + rows.map(r => '<b>' + kb(r) + '</b><span>' + esc(r[1]) + '</span>').join('') + '</div><p class="note">Zasięg czujek uwzględnia ściany (przycisk „Ściany blokują zasięg” u góry). Wartości zasięgów w katalogu są orientacyjne — przed realizacją sprawdź dane producenta i obowiązujące normy.</p>' });
   openModal({ title: 'Skróty i wskazówki', body, buttons: [{ label: 'Zamknij', primary: true, onClick: closeModal }] });
 }
 
@@ -2095,6 +2109,18 @@ const OPTS = [
 ];
 const getO = k => k.startsWith('L.') ? O.L[k.slice(2)] : O[k];
 const setO = (k, v) => { if (k.startsWith('L.')) O.L[k.slice(2)] = v; else O[k] = v; };
+const UI = { optbar: true, left: true, right: true };
+const narrow = () => window.matchMedia && matchMedia('(max-width:1100px)').matches;
+function applyUI() {
+  const m = $('#main'); if (!m) return;
+  m.classList.toggle('hideL', !UI.left); m.classList.toggle('hideR', !UI.right);
+  $('#optbar').classList.toggle('collapsed', !UI.optbar);
+  const t = $('#optToggle'); if (t) { t.textContent = UI.optbar ? '▴ Ukryj opcje' : '▾ Opcje'; t.setAttribute('aria-expanded', String(UI.optbar)); }
+  $('#btnPanelL').setAttribute('aria-pressed', String(UI.left)); $('#btnPanelR').setAttribute('aria-pressed', String(UI.right));
+  try { localStorage.setItem('alarmmaker.ui', JSON.stringify(UI)); } catch (e) { /* ok */ }
+  requestDraw(); setTimeout(resizeCanvas, 30);
+}
+function toggleFocus() { if (narrow()) return; const any = UI.left || UI.right || UI.optbar; UI.left = UI.right = UI.optbar = !any; applyUI(); }
 function buildOptbar() {
   const bar = $('#optbar'); bar.replaceChildren();
   const groups = [h('div', { class: 'optgroup' }), h('div', { class: 'optgroup' })];
@@ -2109,7 +2135,8 @@ function buildOptbar() {
   const dw = h('input', { id: 'openW', type: 'number', min: 0.4, max: 6, step: 0.05, value: O.doorW, style: 'width:62px;height:24px;border:1px solid var(--line);background:var(--panel2);border-radius:5px;padding:0 4px;text-align:right', 'aria-label': 'Szerokość drzwi' });
   dw.addEventListener('change', () => { const k = openKey(); O[k] = clamp(parseFloat(dw.value) || O[k], 0.4, 6); dw.value = O[k]; scheduleSave(); });
   const g4 = h('div', { class: 'optgroup', id: 'optDoor', hidden: true }, h('span', { class: 'opt', text: 'Szerokość (m)' }), dw);
-  bar.append(...groups, g3, g4);
+  bar.append(h('div', { class: 'optgroup keep' }, h('button', { id: 'optToggle', class: 'opt', title: 'Zwiń / rozwiń pasek opcji', onclick: () => { UI.optbar = !UI.optbar; applyUI(); } })), ...groups, g3, g4);
+  applyUI();
 }
 function syncOptbar() {
   $$('#optbar .opt[data-o]').forEach(b => b.setAttribute('aria-pressed', String(!!getO(b.dataset.o))));
@@ -2277,7 +2304,7 @@ function doorPanel(box, d) {
     kind === 'door' ? h('button', { class: 'btn line', text: 'Odwróć zawiasy', onclick: () => { d.hinge *= -1; touch(); commit(); } }) : null,
     kind === 'door' ? h('button', { class: 'btn line', text: 'Odwróć otwieranie', onclick: () => { d.sw *= -1; touch(); commit(); } }) : null));
   box.append(s2);
-  box.append(h('div', { class: 'note', text: 'Usunięcie elementu zamyka otwór w ścianie. Stan otwarte/zamknięte wpływa na pokrycie czujkami w zakładce Analiza.' }));
+  box.append(h('div', { class: 'note', text: 'Otwarte skrzydło drzwi przesłania zasięg, więc zawiasy i kierunek otwierania wpływają na pokrycie. Usunięcie elementu zamyka otwór w ścianie.' }));
   box.append(h('div', { class: 'btnrow' }, h('button', { class: 'btn danger line', text: 'Usuń', onclick: deleteSel })));
 }
 function groupControls(ids) {
@@ -2776,8 +2803,8 @@ function bindUI() {
   $('#btnUndo').innerHTML = icon('undo'); $('#btnRedo').innerHTML = icon('redo'); $('#btnHelp').innerHTML = icon('help'); $('#btnPanelL').innerHTML = icon('catalog'); $('#btnPanelR').innerHTML = icon('panel');
   $('#btnUndo').onclick = undo; $('#btnRedo').onclick = redo; $('#btnHelp').onclick = showHelp;
   $('#scaleChip').onclick = () => showScaleDialog(plan());
-  $('#btnPanelL').onclick = () => { $('#main').classList.toggle('showL'); $('#main').classList.remove('showR'); };
-  $('#btnPanelR').onclick = () => { $('#main').classList.toggle('showR'); $('#main').classList.remove('showL'); };
+  $('#btnPanelL').onclick = () => { if (narrow()) { $('#main').classList.toggle('showL'); $('#main').classList.remove('showR'); } else { UI.left = !UI.left; applyUI(); } };
+  $('#btnPanelR').onclick = () => { if (narrow()) { $('#main').classList.toggle('showR'); $('#main').classList.remove('showL'); } else { UI.right = !UI.right; applyUI(); } };
   $('#projName').addEventListener('input', e => { P.name = e.target.value; document.title = P.name + ' — AlarmMaker'; scheduleSave(); });
   $('#palSearch').addEventListener('input', buildPalette);
   $$('.tabs button').forEach(b => b.onclick = () => setTab(b.dataset.tab));
@@ -2795,6 +2822,7 @@ function bindUI() {
   new MutationObserver(readTheme).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
 }
 async function init() {
+  try { Object.assign(UI, JSON.parse(localStorage.getItem('alarmmaker.ui') || '{}')); } catch (e) { /* ok */ }
   P = mkProject(); ai = 0;
   cv = $('#cv'); cx = cv.getContext('2d');
   readTheme(); buildRail(); buildMenus(); buildOptbar(); bindUI(); bindCanvas(); buildPalette();
