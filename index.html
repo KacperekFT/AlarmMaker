@@ -1070,8 +1070,10 @@ function drawScene(ctx, pl, v, W, H, o) {
     const c = polyCentroid(r.pts), s = w2s(v, c), a = polyArea(r.pts) / (ppm * ppm);
     if (r.pts.length < 3) continue;
     const fs = 12.5 * K;
-    halo(ctx, r.name, s.x, s.y - 7 * K, '600 ' + fs + 'px ' + FONT, '#27343d');
-    halo(ctx, fnum(a, 1) + ' m²', s.x, s.y + 7 * K, '500 ' + (11 * K) + 'px ' + FONT, '#4a5b66');
+    const showN = !!(r.name && r.name.trim()) && !r.hideName && O.showNames !== false, showA = !r.hideArea && O.showAreas !== false;
+    const dy = showN && showA ? 7 * K : 0;
+    if (showN) halo(ctx, r.name, s.x, s.y - dy, '600 ' + fs + 'px ' + FONT, '#27343d');
+    if (showA) halo(ctx, fnum(a, 1) + ' m²', s.x, s.y + dy, '500 ' + (11 * K) + 'px ' + FONT, '#4a5b66');
   }
   /* kable, bariery, wymiary */
   for (const l of pl.lines) {
@@ -2272,6 +2274,8 @@ function roomPanel(box, r) {
   box.append(sec('Dane',
     textRow('Nazwa', () => r.name, v => { r.name = v; }),
     selectRow('Strefa', zoneOpts(), () => r.zone || '', v => { r.zone = v || null; }),
+    checkRow('Pokaż nazwę na rysunku', () => !r.hideName, v => { r.hideName = !v || undefined; }),
+    checkRow('Pokaż metraż na rysunku', () => !r.hideArea, v => { r.hideArea = !v || undefined; }),
     numRow('Wysokość stropu', () => r.h, v => { r.h = v; }, { min: 1, max: 30, step: 0.1, unit: 'm' }),
     h('div', { class: 'kv', style: 'margin-top:6px' }, h('span', { text: 'Powierzchnia' }), h('span', { text: fnum(area, 2) + ' m²' }), h('span', { text: 'Obwód' }), h('span', { text: fnum(per, 2) + ' m' }), h('span', { text: 'Kubatura' }), h('span', { text: fnum(area * r.h, 1) + ' m³' }))));
   const bars = covBars(pl, r);
@@ -2384,7 +2388,7 @@ function renderLayers() {
   const box = $('#pane-layers'); box.replaceChildren();
   const chk = (label, get, set) => { const c = h('input', { type: 'checkbox', checked: !!get() }); c.addEventListener('change', () => { set(c.checked); touch(); requestDraw(); refreshUI(); scheduleSave(); }); return h('label', { class: 'check' }, c, h('span', { text: label })); };
   const L = O.L;
-  box.append(sec('Warstwy', chk('Podkład (PDF / obraz)', () => L.bg, v => L.bg = v), chk('Pomieszczenia', () => L.rooms, v => L.rooms = v), chk('Ściany i drzwi', () => L.walls, v => L.walls = v), chk('Zasięgi detekcji', () => L.cov, v => L.cov = v), chk('Urządzenia', () => L.dev, v => L.dev = v), chk('Etykiety urządzeń', () => L.labels, v => L.labels = v), chk('Okablowanie i bariery', () => L.cables, v => L.cables = v), chk('Wymiary', () => L.dims, v => L.dims = v), chk('Opisy', () => L.texts, v => L.texts = v)));
+  box.append(sec('Warstwy', chk('Podkład (PDF / obraz)', () => L.bg, v => L.bg = v), chk('Pomieszczenia', () => L.rooms, v => L.rooms = v), chk('Ściany i drzwi', () => L.walls, v => L.walls = v), chk('Zasięgi detekcji', () => L.cov, v => L.cov = v), chk('Urządzenia', () => L.dev, v => L.dev = v), chk('Etykiety urządzeń', () => L.labels, v => L.labels = v), chk('Nazwy pomieszczeń', () => O.showNames !== false, v => O.showNames = v), chk('Metraże pomieszczeń', () => O.showAreas !== false, v => O.showAreas = v), chk('Okablowanie i bariery', () => L.cables, v => L.cables = v), chk('Wymiary', () => L.dims, v => L.dims = v), chk('Opisy', () => L.texts, v => L.texts = v)));
   const sl = (label, key, min, max, step, unit, mul) => {
     const get = () => O[key] * (mul || 1);
     const num = h('input', { type: 'number', class: 'num', min, max, step, value: Math.round(get() * 100) / 100 });
