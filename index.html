@@ -1296,11 +1296,11 @@ function fitView(pl, quiet) {
 /* ---------- eksport arkusza (PNG / PDF / raport) ---------- */
 function sheetCanvas(pl, W, H) {
   const c = document.createElement('canvas'); c.width = W; c.height = H;
-  const g = c.getContext('2d'), M = Math.round(W * 0.014), RW = Math.round(W * 0.2);
+  const g = c.getContext('2d'), M = Math.round(W * 0.014), hasL = O.showLegend !== false, hasT = O.showTitle !== false, RW = (hasL || hasT) ? Math.round(W * 0.2) : 0;
   const saveK = K; K = W / 1700;
   g.fillStyle = '#fff'; g.fillRect(0, 0, W, H);
   g.strokeStyle = '#1a2730'; g.lineWidth = 2 * K; g.strokeRect(M, M, W - 2 * M, H - 2 * M);
-  const px = M, py = M, pw = W - 3 * M - RW, ph = H - 2 * M, rx = px + pw + M;
+  const px = M, py = M, pw = RW ? W - 3 * M - RW : W - 2 * M, ph = H - 2 * M, rx = px + pw + M;
   g.strokeRect(px, py, pw, ph);
   const bx = contentBox(pl) || { x0: 0, y0: 0, x1: 100, y1: 100 };
   const bw = bx.x1 - bx.x0, bh = bx.y1 - bx.y0, z = Math.min((pw - 40 * K) / bw, (ph - 40 * K) / bh);
@@ -1318,7 +1318,7 @@ function sheetCanvas(pl, W, H) {
   g.font = '600 ' + 13 * K + 'px ' + FONT; g.textAlign = 'left'; g.textBaseline = 'alphabetic'; g.fillText('0', sx, sy - 5 * K); g.textAlign = 'right'; g.fillText(sm + ' m', sx + sl, sy - 5 * K);
   g.restore();
   /* prawa kolumna: legenda + tabliczka */
-  const tbH = Math.round(ph * (O.sheetNote ? 0.36 : 0.3)), lgH = ph - tbH - M;
+  const tbH = hasT ? Math.round(ph * (O.sheetNote ? 0.36 : 0.3)) : 0, lgH = hasL ? (hasT ? ph - tbH - M : ph) : 0;
   if (O.showLegend !== false) {
   g.strokeStyle = '#1a2730'; g.lineWidth = 2 * K; g.strokeRect(rx, py, RW, lgH);
   g.textAlign = 'left'; g.textBaseline = 'middle'; g.fillStyle = '#1a2730';
@@ -1346,7 +1346,7 @@ function sheetCanvas(pl, W, H) {
     g.fillStyle = '#1a2730'; g.font = '500 ' + 13 * K + 'px ' + FONT; g.fillText('Zasięg: ' + COVS[c2].name.toLowerCase(), rx + 50 * K, yy); yy += rowH;
   }
   }
-  const ty = py + lgH + M;
+  const ty = hasL ? py + lgH + M : py + ph - tbH;
   if (O.showTitle !== false) {
   g.strokeStyle = '#1a2730'; g.lineWidth = 2 * K; g.strokeRect(rx, ty, RW, tbH);
   const rows = [['Projekt', P.name], ['Rysunek', pl.name], ['Inwestor', P.client || '—'], ['Projektant', P.author || '—'], ['Data', P.date || '—']];
