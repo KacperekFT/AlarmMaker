@@ -778,73 +778,9 @@ function wallSnapPoint(pl, p, tolW) {
   return { x: best.r.x + nx * off, y: best.r.y + ny * off, rot: Math.atan2(ny, nx) * R2D + 90 };
 }
 
-/* ---------- auto-rozmieszczanie czujek w pomieszczeniu ---------- */
-function autoPlace(pl, room, typeId) {
-  const def = DEV[typeId];
-  if (!def || !def.range || !def.cov) return { n: 0, msg: 'Ten typ urządzenia nie ma zasięgu detekcji.' };
-  const samp = roomSamples(pl, room), N = samp.pts.length / 2;
-  if (N === 0) return { n: 0, msg: 'Pomieszczenie jest zbyt małe.' };
-  const covered = new Uint8Array(N);
-  const existing = pl.devices.filter(d => DEV[d.type] && DEV[d.type].cov === def.cov).map(d => visOf(pl, d)).filter(Boolean);
-  for (let i = 0; i < N; i++) for (const v of existing) if (visHas(v, samp.pts[2 * i], samp.pts[2 * i + 1])) { covered[i] = 1; break; }
-  const R = def.range * pl.ppm, ceil = def.mount === 'ceiling' || def.fov >= 360;
-  const cands = [], pts = room.pts, bb = bboxOf(pts), c0 = polyCentroid(pts);
-  const inward = (a, b, mx, my) => {
-    const dx = b.x - a.x, dy = b.y - a.y, L = Math.hypot(dx, dy) || 1; let nx = -dy / L, ny = dx / L;
-    if (!inPoly(mx + nx * 0.05 * pl.ppm, my + ny * 0.05 * pl.ppm, pts)) { nx = -nx; ny = -ny; }
-    return { nx, ny };
-  };
-  if (ceil) {
-    const areaM = samp.areaM, stepM = Math.max(0.5, Math.sqrt(areaM / 450)), st = stepM * pl.ppm, inset = 0.25 * pl.ppm;
-    for (let y = bb.y0 + st / 2; y < bb.y1; y += st) for (let x = bb.x0 + st / 2; x < bb.x1; x += st)
-      if (inPoly(x, y, pts) && polyDistEdge(x, y, pts) >= inset) cands.push({ x, y, rot: 0 });
-  } else {
-    const off = 0.15 * pl.ppm, st = 0.75 * pl.ppm;
-    for (let i = 0; i < pts.length; i++) {
-      const a = pts[i], b = pts[(i + 1) % pts.length], L = Math.hypot(b.x - a.x, b.y - a.y);
-      if (L < 1) continue;
-      const { nx, ny } = inward(a, b, (a.x + b.x) / 2, (a.y + b.y) / 2), rot = Math.atan2(ny, nx) * R2D + 90;
-      const k = Math.max(1, Math.round(L / st));
-      for (let j = 0; j <= k; j++) {
-        const t = j / k, x = a.x + (b.x - a.x) * t + nx * off, y = a.y + (b.y - a.y) * t + ny * off;
-        if (!inPoly(x, y, pts)) continue;
-        cands.push({ x, y, rot });
-        if (j === 0 || j === k) {
-          const ang = Math.atan2(c0.y - y, c0.x - x) * R2D + 90;
-          cands.push({ x: x + nx * off * 0.5, y: y + ny * off * 0.5, rot: ang });
-        }
-      }
-    }
-  }
-  if (!cands.length) return { n: 0, msg: 'Nie znaleziono miejsc montażu.' };
-  const fov = def.fov || 360, full = fov >= 359.99, oc = O.occlusion ? occl(pl).segs : null;
-  for (const c of cands) {
-    const a0 = full ? 0 : c.rot - 90 - fov / 2;
-    const v = computeVis(c.x, c.y, R, fov, a0, full, oc, '');
-    const idx = [];
-    for (let i = 0; i < N; i++) if (visHas(v, samp.pts[2 * i], samp.pts[2 * i + 1])) idx.push(i);
-    c.idx = idx;
-  }
-  const placed = [];
-  let left = 0; for (let i = 0; i < N; i++) if (!covered[i]) left++;
-  const stopAt = N * 0.004;
-  for (let it = 0; it < 80 && left > stopAt; it++) {
-    let best = null, bn = 0;
-    for (const c of cands) { let k = 0; for (const i of c.idx) if (!covered[i]) k++; if (k > bn) { bn = k; best = c; } }
-    if (!best || bn === 0) break;
-    for (const i of best.idx) if (!covered[i]) { covered[i] = 1; left--; }
-    placed.push(best);
-  }
-  for (const c of placed) {
-    const d = newDevice(typeId, c.x, c.y, c.rot, room.zone);
-    pl.devices.push(d);
-  }
-  return { n: placed.length, left: left / N * 100 };
-}
-
 /* ---------- grupy kabli ---------- */
 const GROUP_COLORS = ['#d6249f', '#0891b2', '#7c3aed', '#ea580c', '#059669', '#b91c1c', '#4f46e5', '#a16207'];
-function lineLen(pl, l) { let len = 0; for (let i = 1; i < l.pts.length; i++) len += Math.hypot(l.pts[i].x - l.pts[i - 1].x, l.pts[i].y - l.pts[i - 1].y); return len / pl.ppm; }
+function lineLen(pl, l) { let len = 0; for (let i = 1; i < l.pts.length; i++) len += Math.hypot(l.pts[i].x - l.pts[i - 1].x, l.pts[i].y - l.pts[i - 1].y); return len / pl.ppm + (l.extra || 0); }
 function createGroup(name, ids) {
   const g = { id: uid(), name: name || 'Grupa ' + (P.cableGroups.length + 1), color: GROUP_COLORS[P.cableGroups.length % GROUP_COLORS.length] };
   P.cableGroups.push(g); setGroup(ids, g.id); return g;
@@ -1145,7 +1081,7 @@ function drawLine(ctx, pl, v, l, def, sel) {
   ctx.beginPath(); pts.forEach((p, i) => i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y)); ctx.stroke();
   ctx.setLineDash([]);
   let len = 0; for (let i = 1; i < l.pts.length; i++) len += Math.hypot(l.pts[i].x - l.pts[i - 1].x, l.pts[i].y - l.pts[i - 1].y);
-  len /= pl.ppm;
+  len = len / pl.ppm + (l.extra || 0);
   if (def.beam) {
     for (const p of [pts[0], pts[pts.length - 1]]) { ctx.fillStyle = def.color; ctx.strokeStyle = '#fff'; ctx.lineWidth = 1.4 * K; ctx.fillRect(p.x - 5 * K, p.y - 5 * K, 10 * K, 10 * K); ctx.strokeRect(p.x - 5 * K, p.y - 5 * K, 10 * K, 10 * K); }
   }
@@ -1271,7 +1207,10 @@ let cv, cx, cssW = 0, cssH = 0, dpr = 1;
 function resizeCanvas() {
   const r = cv.getBoundingClientRect();
   dpr = Math.min(window.devicePixelRatio || 1, 2.5);
+  const ow = cssW, oh = cssH;
   cssW = Math.max(1, Math.round(r.width)); cssH = Math.max(1, Math.round(r.height));
+  const cp = plan();
+  if (cp && ow > 1 && oh > 1 && !cp.view.fit && typeof UI !== 'undefined' && UI.autoCenter !== false) { cp.view.x += (cssW - ow) / 2; cp.view.y += (cssH - oh) / 2; }
   cv.width = Math.round(cssW * dpr); cv.height = Math.round(cssH * dpr);
   const pl = plan(); if (pl && pl.view.fit) fitView(pl, true);
   requestDraw();
@@ -1325,6 +1264,8 @@ function sheetCanvas(pl, W, H) {
   const deadSave = O.dead; O.dead = '';
   drawScene(g, pl, v, W, H, { ui: false, export: true });
   O.dead = deadSave;
+  g.font = '700 ' + 22 * K + 'px ' + FONT; g.textAlign = 'left'; g.textBaseline = 'middle';
+  const flw = g.measureText(pl.name).width + 28 * K; g.fillStyle = 'rgba(255,255,255,.92)'; g.fillRect(px + 12 * K, py + 12 * K, flw, 36 * K); g.strokeStyle = '#1a2730'; g.lineWidth = 1.5 * K; g.strokeRect(px + 12 * K, py + 12 * K, flw, 36 * K); g.fillStyle = '#1a2730'; g.fillText(pl.name, px + 26 * K, py + 31 * K);
   /* podziałka */
   const steps = [1, 2, 5, 10, 20, 50, 100], target = pw * 0.14;
   let sm = steps[0]; for (const s of steps) if (s * pl.ppm * z <= target) sm = s;
@@ -1509,22 +1450,35 @@ function hitTest(pl, sx, sy) {
 function select(list) { S.sel = list; refreshSelection(); }
 function clearSel() { if (S.sel.length) { S.sel = []; refreshSelection(); } }
 function refreshSelection() { requestDraw(); renderInspector(); if (typeof activeTab !== 'undefined' && activeTab !== 'props') { /* zostaje */ } }
-function captureSel() {
-  const out = [];
+function attachedOf(pl, room) {
+  const eps = Math.max(1, 0.03 * pl.ppm), on = (pts, p) => polyDistEdge(p.x, p.y, pts) <= eps;
+  const others = pl.rooms.filter(r => r !== room), mid = w => ({ x: (w.a.x + w.b.x) / 2, y: (w.a.y + w.b.y) / 2 });
+  const walls = pl.walls.filter(w => on(room.pts, w.a) && on(room.pts, w.b) && on(room.pts, mid(w)) && !others.some(r => on(r.pts, w.a) && on(r.pts, w.b) && on(r.pts, mid(w))));
+  const doors = pl.doors.filter(d => on(room.pts, d) && !others.some(r => on(r.pts, d)));
+  return { walls, doors };
+}
+function expandedSel() {   // zaznaczenie + ściany i drzwi należące wyłącznie do zaznaczonych pomieszczeń
+  const pl = plan(), out = [], seen = new Set();
+  const add = (k, e) => { const key = k + e.id; if (!seen.has(key) && !e.locked) { seen.add(key); out.push({ k, e }); } };
   for (const s of S.sel) {
-    const e = getEnt(s.k, s.id); if (!e || s.k === 'o' || e.locked) continue;
-    const o = { k: s.k, id: s.id };
-    if (s.k === 'd' || s.k === 't') { o.x = e.x; o.y = e.y; }
-    else if (s.k === 'r') o.pts = e.pts.map(p => ({ x: p.x, y: p.y }));
-    else if (s.k === 'w') { o.a = { x: e.a.x, y: e.a.y }; o.b = { x: e.b.x, y: e.b.y }; }
-    else if (s.k === 'l') o.pts = e.pts.map(p => ({ x: p.x, y: p.y }));
-    out.push(o);
+    const e = getEnt(s.k, s.id); if (!e || s.k === 'o') continue;
+    add(s.k, e);
+    if (s.k === 'r' && !e.locked) { const at = attachedOf(pl, e); at.walls.forEach(w => add('w', w)); at.doors.forEach(d => add('o', d)); }
   }
   return out;
 }
+function captureSel() {
+  return expandedSel().map(({ k, e }) => {
+    const o = { k, id: e.id };
+    if (k === 'd' || k === 't' || k === 'o') { o.x = e.x; o.y = e.y; }
+    else if (k === 'r' || k === 'l') o.pts = e.pts.map(p => ({ x: p.x, y: p.y }));
+    else if (k === 'w') { o.a = { x: e.a.x, y: e.a.y }; o.b = { x: e.b.x, y: e.b.y }; }
+    return o;
+  });
+}
 function applyOrig(o, dx, dy) {
   const e = getEnt(o.k, o.id); if (!e) return;
-  if (o.k === 'd' || o.k === 't') { e.x = o.x + dx; e.y = o.y + dy; }
+  if (o.k === 'd' || o.k === 't' || o.k === 'o') { e.x = o.x + dx; e.y = o.y + dy; }
   else if (o.k === 'r' || o.k === 'l') o.pts.forEach((p, i) => { e.pts[i].x = p.x + dx; e.pts[i].y = p.y + dy; });
   else if (o.k === 'w') { e.a.x = o.a.x + dx; e.a.y = o.a.y + dy; e.b.x = o.b.x + dx; e.b.y = o.b.y + dy; }
 }
@@ -1550,7 +1504,7 @@ function deleteSel() {
   S.sel = []; commit(); refreshSelection();
 }
 function shiftEnt(k, e, dx, dy) {
-  if (k === 'd' || k === 't') { e.x += dx; e.y += dy; }
+  if (k === 'd' || k === 't' || k === 'o') { e.x += dx; e.y += dy; }
   else if (k === 'r' || k === 'l') e.pts.forEach(p => { p.x += dx; p.y += dy; });
   else if (k === 'w') { e.a.x += dx; e.a.y += dy; e.b.x += dx; e.b.y += dy; }
 }
@@ -1567,11 +1521,11 @@ function cloneEnts(items, dx, dy) {
 function selItems() { return S.sel.map(s => ({ k: s.k, e: getEnt(s.k, s.id) })).filter(i => i.e && i.k !== 'o'); }
 const movableItems = () => selItems().filter(i => !i.e.locked);
 function duplicateSel() {
-  const items = selItems(); if (!items.length) return;
+  const items = expandedSel(); if (!items.length) return;
   const off = 0.6 * plan().ppm;
   S.sel = cloneEnts(items, off, off); commit(); refreshSelection();
 }
-function copySel() { const items = selItems(); if (!items.length) return; S.clip = JSON.stringify(items.map(i => ({ k: i.k, e: i.e })), skipPriv); toast('Skopiowano ' + items.length + ' obiekt(ów)'); }
+function copySel() { const items = expandedSel(); if (!items.length) return; S.clip = JSON.stringify(items.map(i => ({ k: i.k, e: i.e })), skipPriv); toast('Skopiowano ' + items.length + ' obiekt(ów)'); }
 function pasteSel() {
   if (!S.clip) return;
   const items = JSON.parse(S.clip), off = 1 * plan().ppm;
@@ -1779,7 +1733,7 @@ function applyMove(d, wp) {
   touch();
 }
 function nudge(dx, dy) {
-  const pl = plan(), items = movableItems(); if (!items.length) return;
+  const pl = plan(), items = expandedSel(); if (!items.length) return;
   const g = O.gridStep * pl.ppm * (S.shift ? 5 : 1);
   for (const it of items) { shiftEnt(it.k, it.e, dx * g, dy * g); if (it.k === 'd') it.e._vis = null; }
   commit();
@@ -2111,13 +2065,14 @@ const OPTS = [
 ];
 const getO = k => k.startsWith('L.') ? O.L[k.slice(2)] : O[k];
 const setO = (k, v) => { if (k.startsWith('L.')) O.L[k.slice(2)] = v; else O[k] = v; };
-const UI = { optbar: true, left: true, right: true };
+const UI = { optbar: true, left: true, right: true, autoCenter: true };
 const narrow = () => window.matchMedia && matchMedia('(max-width:1100px)').matches;
 function applyUI() {
   const m = $('#main'); if (!m) return;
   m.classList.toggle('hideL', !UI.left); m.classList.toggle('hideR', !UI.right);
   $('#optbar').classList.toggle('collapsed', !UI.optbar);
   const t = $('#optToggle'); if (t) { t.textContent = UI.optbar ? '▴ Ukryj opcje' : '▾ Opcje'; t.setAttribute('aria-expanded', String(UI.optbar)); }
+  const ac = $('#optCenter'); if (ac) ac.setAttribute('aria-pressed', String(UI.autoCenter !== false));
   $('#btnPanelL').setAttribute('aria-pressed', String(UI.left)); $('#btnPanelR').setAttribute('aria-pressed', String(UI.right));
   try { localStorage.setItem('alarmmaker.ui', JSON.stringify(UI)); } catch (e) { /* ok */ }
   requestDraw(); setTimeout(resizeCanvas, 30);
@@ -2137,7 +2092,7 @@ function buildOptbar() {
   const dw = h('input', { id: 'openW', type: 'number', min: 0.4, max: 6, step: 0.05, value: O.doorW, style: 'width:62px;height:24px;border:1px solid var(--line);background:var(--panel2);border-radius:5px;padding:0 4px;text-align:right', 'aria-label': 'Szerokość drzwi' });
   dw.addEventListener('change', () => { const k = openKey(); O[k] = clamp(parseFloat(dw.value) || O[k], 0.4, 6); dw.value = O[k]; scheduleSave(); });
   const g4 = h('div', { class: 'optgroup', id: 'optDoor', hidden: true }, h('span', { class: 'opt', text: 'Szerokość (m)' }), dw);
-  bar.append(h('div', { class: 'optgroup keep' }, h('button', { id: 'optToggle', class: 'opt', title: 'Zwiń / rozwiń pasek opcji', onclick: () => { UI.optbar = !UI.optbar; applyUI(); } })), ...groups, g3, g4);
+  bar.append(h('div', { class: 'optgroup keep' }, h('button', { id: 'optToggle', class: 'opt', title: 'Zwiń / rozwiń pasek opcji', onclick: () => { UI.optbar = !UI.optbar; applyUI(); } }), h('button', { id: 'optCenter', class: 'opt', text: 'Auto-środek', title: 'Po zwinięciu lub rozwinięciu paneli rysunek zostaje na środku obszaru roboczego', onclick: () => { UI.autoCenter = UI.autoCenter === false; applyUI(); } })), ...groups, g3, g4);
   applyUI();
 }
 function syncOptbar() {
@@ -2280,15 +2235,6 @@ function roomPanel(box, r) {
     h('div', { class: 'kv', style: 'margin-top:6px' }, h('span', { text: 'Powierzchnia' }), h('span', { text: fnum(area, 2) + ' m²' }), h('span', { text: 'Obwód' }), h('span', { text: fnum(per, 2) + ' m' }), h('span', { text: 'Kubatura' }), h('span', { text: fnum(area * r.h, 1) + ' m³' }))));
   const bars = covBars(pl, r);
   if (bars) box.append(sec('Pokrycie pomieszczenia', bars));
-  const opts = DEVS.filter(d => d.cov && d.range > 0);
-  const sel = h('select', {}, opts.map(d => h('option', { value: d.id, text: d.name }))); sel.value = 'smoke';
-  box.append(sec('Auto-rozmieszczanie',
-    h('div', { class: 'ctl' }, sel),
-    h('div', { class: 'note', style: 'margin:6px 0', text: 'Dobiera minimalną liczbę czujek wybranego typu tak, by pokryć całe pomieszczenie (z uwzględnieniem ścian i już istniejących czujek).' }),
-    h('button', { class: 'btn primary', text: 'Rozmieść czujki', onclick: () => {
-      const res = autoPlace(plan(), r, sel.value);
-      if (res.n) { commit(); toast('Dodano ' + res.n + ' szt.' + (res.left > 1 ? ' (nie pokryto ' + fnum(res.left, 0) + '% powierzchni)' : '')); } else toast(res.msg || 'Pomieszczenie jest już w pełni pokryte.');
-    } })));
   box.append(h('div', { class: 'btnrow' }, h('button', { class: 'btn line', text: 'Utwórz ściany z obrysu', onclick: () => { const n = addWallsForPoly(plan(), r.pts); commit(); toast(n ? 'Dodano ' + n + ' ścian' : 'Ściany już istnieją'); } }), h('button', { class: 'btn line', text: 'Duplikuj', onclick: duplicateSel }), h('button', { class: 'btn danger line', text: 'Usuń', onclick: deleteSel })));
 }
 function wallPanel(box, w) {
@@ -2324,12 +2270,13 @@ function groupControls(ids) {
 function linePanel(box, l) {
   const pl = plan(), def = LINE[l.kind]; let len = 0;
   for (let i = 1; i < l.pts.length; i++) len += Math.hypot(l.pts[i].x - l.pts[i - 1].x, l.pts[i].y - l.pts[i - 1].y);
-  len /= pl.ppm;
+  len = len / pl.ppm + (l.extra || 0);
   box.append(h('div', { class: 'title' }, h('img', { src: lineIcon(def), alt: '' }), h('div', {}, h('b', { text: def.name }), h('small', { text: fnum(len, 2) + ' m' }))));
   const kinds = LINES.filter(x => !!x.dim === !!def.dim && !!x.beam === !!def.beam);
   box.append(sec('Dane', kinds.length > 1 ? selectRow('Rodzaj', kinds.map(x => ({ v: x.id, t: x.name })), () => l.kind, v => { l.kind = v; }) : null,
     def.dim ? null : textRow('Etykieta', () => l.label, v => { l.label = v; }, 'np. magistrala A')));
   if (!def.dim) {
+    box.append(sec('Dodatkowa długość', numRow('Dodatkowo', () => l.extra || 0, v => { l.extra = v || undefined; }, { min: 0, max: 200, step: 0.5, unit: 'm' }), h('div', { class: 'note', text: 'Doliczana do długości odcinka — np. pion kablowy między piętrami, zejście do urządzenia lub zapas w szafie.' })));
     box.append(groupControls([l.id]));
     box.append(h('div', { class: 'btnrow' }, h('button', { class: 'btn line', text: 'Zaznacz połączone odcinki', onclick: () => { select(connectedLines(plan(), l.id).map(id => ({ k: 'l', id }))); } })));
   }
@@ -2489,8 +2436,8 @@ function bomData(scope) {
     for (const d of pl.devices) dc[d.type] = (dc[d.type] || 0) + 1;
     for (const l of pl.lines) {
       if (LINE[l.kind].dim) continue;
-      let len = 0; for (let i = 1; i < l.pts.length; i++) len += Math.hypot(l.pts[i].x - l.pts[i - 1].x, l.pts[i].y - l.pts[i - 1].y);
-      lc[l.kind] = (lc[l.kind] || 0) + 1; ll[l.kind] = (ll[l.kind] || 0) + len / pl.ppm;
+      const len = lineLen(pl, l);
+      lc[l.kind] = (lc[l.kind] || 0) + 1; ll[l.kind] = (ll[l.kind] || 0) + len;
     }
     for (const r of analyzePlan(pl).rooms) rooms.push({ plan: pl.name, name: r.room.name, area: r.area, pct: r.pct });
   }
@@ -2715,17 +2662,17 @@ async function doExportPng() {
   try { const c = sheetCanvas(plan(), 4200, 2970); const blob = await new Promise(r => c.toBlob(r, 'image/png')); stop(); await saveFile(fileBase() + '-' + plan().name.replace(/[^\p{L}\p{N}_-]+/gu, '_') + '.png', blob); }
   catch (e) { stop(); toast('Błąd eksportu: ' + e.message); }
 }
-async function doExportPdf() {
+async function doExportPdf(plans) {
   const stop = busy('Generowanie PDF…');
   try {
     if (!window.jspdf) await loadScript('https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js');
     await new Promise(r => setTimeout(r, 30));
     const { jsPDF } = window.jspdf, doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a3' });
-    P.plans.forEach((pl, i) => { if (i) doc.addPage('a3', 'landscape'); const c = sheetCanvas(pl, 3508, 2480); doc.addImage(c.toDataURL('image/jpeg', 0.92), 'JPEG', 0, 0, 420, 297); });
+    (plans || P.plans).forEach((pl, i) => { if (i) doc.addPage('a3', 'landscape'); const c = sheetCanvas(pl, 3508, 2480); doc.addImage(c.toDataURL('image/jpeg', 0.92), 'JPEG', 0, 0, 420, 297); });
     const blob = doc.output('blob'); stop(); await saveFile(fileBase() + '.pdf', blob);
   } catch (e) { stop(); console.error(e); toast('Nie udało się wygenerować PDF: ' + e.message); }
 }
-async function doMakeReport() {
+async function doMakeReport(plans) {
   const stop = busy('Budowanie raportu…'); await new Promise(r => setTimeout(r, 30));
   try {
     const b = bomData('all'), css = 'body{font:14px/1.5 system-ui,sans-serif;max-width:1000px;margin:24px auto;padding:0 16px;color:#1a2730}h1{margin:0 0 4px}h2{margin:28px 0 8px;border-bottom:2px solid #1a2730;padding-bottom:4px}table{border-collapse:collapse;width:100%;margin:8px 0}th,td{border:1px solid #c9d2d8;padding:5px 8px;text-align:left}th{background:#eef2f4}td.n{text-align:right}img{max-width:100%;border:1px solid #c9d2d8}.m{color:#586a76}';
@@ -2734,7 +2681,7 @@ async function doMakeReport() {
     html += '<h2>Zestawienie urządzeń</h2><table><tr><th>Skrót</th><th>Nazwa</th><th class="n">Ilość</th></tr>' + b.devs.map(x => '<tr><td>' + esc(x.def.abbr) + '</td><td>' + esc(x.def.name) + '</td><td class="n">' + x.n + '</td></tr>').join('') + '</table>';
     if (b.lines.length) html += '<h2>Okablowanie i bariery</h2><table><tr><th>Rodzaj</th><th class="n">Długość [m]</th><th class="n">Z zapasem ' + O.reserve + '% [m]</th></tr>' + b.lines.map(x => '<tr><td>' + esc(x.def.name) + '</td><td class="n">' + fnum(x.len, 1) + '</td><td class="n">' + fnum(x.len * (1 + O.reserve / 100), 1) + '</td></tr>').join('') + '</table>';
     if (b.rooms.length) html += '<h2>Pokrycie pomieszczeń</h2><table><tr><th>Kondygnacja</th><th>Pomieszczenie</th><th class="n">m²</th><th class="n">Włamanie</th><th class="n">Pożar</th><th class="n">Wideo</th></tr>' + b.rooms.map(x => '<tr><td>' + esc(x.plan) + '</td><td>' + esc(x.name) + '</td><td class="n">' + fnum(x.area, 1) + '</td>' + ['intr', 'fire', 'video'].map(c => '<td class="n">' + (x.pct[c] == null ? '—' : fnum(x.pct[c], 0) + '%') + '</td>').join('') + '</tr>').join('') + '</table>';
-    for (const pl of P.plans) { const c = sheetCanvas(pl, 2600, 1840); html += '<h2>Rzut: ' + esc(pl.name) + '</h2><img alt="Rzut ' + esc(pl.name) + '" src="' + c.toDataURL('image/jpeg', 0.88) + '">'; }
+    for (const pl of (plans || P.plans)) { const c = sheetCanvas(pl, 2600, 1840); html += '<h2>Rzut: ' + esc(pl.name) + '</h2><img alt="Rzut ' + esc(pl.name) + '" src="' + c.toDataURL('image/jpeg', 0.88) + '">'; }
     html += '<p class="m">Wartości zasięgów w katalogu są orientacyjne. Przed realizacją zweryfikuj je z danymi producenta i obowiązującymi normami.</p></body></html>';
     stop(); await saveFile(fileBase() + '-raport.html', html);
   } catch (e) { stop(); toast('Błąd raportu: ' + e.message); }
@@ -2754,16 +2701,22 @@ function showPreview(o) {
   const title = h('input', { type: 'text', value: O.sheetTitle || '', placeholder: 'Nagłówek tabliczki', 'aria-label': 'Nagłówek tabliczki', style: 'height:28px;min-width:200px;border:1px solid var(--line);background:var(--panel2);border-radius:5px;padding:0 8px' });
   title.addEventListener('input', () => { O.sheetTitle = title.value; scheduleSave(); clearTimeout(title._t); title._t = setTimeout(render, 250); });
   const ctrl = h('div', { style: 'display:flex;flex-wrap:wrap;align-items:center;gap:6px' }, chk('Legenda', 'showLegend'), chk('Tabliczka rysunkowa', 'showTitle'), title);
+  const chosen = new Set(o.plans.map(p => p.id));
+  if (o.pick && o.plans.length > 1) {
+    const box = h('div', { style: 'display:flex;flex-wrap:wrap;gap:4px 14px;width:100%;padding:6px 0;border-top:1px solid var(--line);margin-top:4px' }, h('b', { text: 'Kondygnacje w pliku:', style: 'font-weight:600' }));
+    for (const p of o.plans) { const c = h('input', { type: 'checkbox', checked: true }); c.addEventListener('change', () => { c.checked ? chosen.add(p.id) : chosen.delete(p.id); }); box.append(h('label', { class: 'check', style: 'display:inline-flex' }, c, h('span', { text: p.name }))); }
+    ctrl.append(box);
+  }
   if (o.plans.length > 1) {
     const sel = h('select', { 'aria-label': 'Kondygnacja', style: 'height:28px;border:1px solid var(--line);background:var(--panel2);border-radius:5px' }, o.plans.map((p, i) => h('option', { value: i, text: p.name })));
     sel.addEventListener('change', () => { idx = parseInt(sel.value, 10); render(); }); ctrl.append(sel);
   }
-  openModal({ title: 'Podgląd przed zapisem: ' + o.label, wide: true, body: h('div', {}, ctrl, img, info), buttons: [{ label: 'Anuluj', onClick: closeModal }, { label: 'Zapisz plik', primary: true, onClick: () => { closeModal(); o.save(); } }] });
+  openModal({ title: 'Podgląd przed zapisem: ' + o.label, wide: true, body: h('div', {}, ctrl, img, info), buttons: [{ label: 'Anuluj', onClick: closeModal }, { label: 'Zapisz plik', primary: true, onClick: () => { const picked = o.plans.filter(p => chosen.has(p.id)); if (!picked.length) { toast('Zaznacz co najmniej jedną kondygnację'); return; } closeModal(); o.save(picked); } }] });
   setTimeout(render, 20);
 }
 function exportPng() { showPreview({ label: 'PNG', plans: [plan()], save: doExportPng }); }
-function exportPdf() { showPreview({ label: 'PDF (wszystkie kondygnacje)', plans: P.plans, save: doExportPdf }); }
-function makeReport() { showPreview({ label: 'raport HTML', plans: P.plans, note: 'Raport zawiera też tabele zestawień.', save: doMakeReport }); }
+function exportPdf() { showPreview({ label: 'PDF (wszystkie kondygnacje)', plans: P.plans, pick: true, save: doExportPdf }); }
+function makeReport() { showPreview({ label: 'raport HTML', plans: P.plans, pick: true, note: 'Raport zawiera też tabele zestawień.', save: doMakeReport }); }
 
 /* ---------- menu górne ---------- */
 function buildMenus() {
